@@ -8,14 +8,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico'],
       manifest: {
         name: 'Shoutbox',
         short_name: 'Shoutbox',
-        description: 'Shoutbox PWA app',
-        theme_color: '#ffffff',
-        display: 'standalone',
         start_url: '/shoutbox-react/',
+        display: 'standalone',
+        theme_color: '#ffffff',
         icons: [
           {
             src: '/pwa-192x192.png',
