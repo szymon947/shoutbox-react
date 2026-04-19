@@ -1,31 +1,70 @@
 import { useState, useEffect } from 'react';
+// 1. IMPORTUJEMY GNIAZDO
+import { io } from 'socket.io-client'; 
+
 import Header from './components/Header';
 import MessageForm from './components/MessageForm';
 import Login from './components/Login';
 import Message from './components/Message';
 
+// 2. PODŁĄCZAMY SIĘ DO SERWERA GŁÓWNEGO NAUCZYCIELA
+// (Jeśli zrobiłeś własny serwer, wpisz tu 'http://localhost:3000')
+const SOCKET_URL = 'https://apichat.m89.pl'; 
 const API_URL = 'https://apichat.m89.pl/api/messages';
 
-function App() {
-  const [wiadomosci, setWiadomosci] = useState([]);
-  const [mojNick, setMojNick] = useState(localStorage.getItem('shoutboxNick') || '');
+// Tworzymy połączenie przed komponentem (aby nie łączyło się od nowa przy każdej zmianie na ekranie)
+const socket = io(SOCKET_URL);
 
-  // --- POBIERANIE (GET) ---
-  const pobierzDane = async () => {
-    try {
-      const odpowiedz = await fetch(API_URL);
-      const dane = await odpowiedz.json();
-      setWiadomosci(dane);
-    } catch (error) { console.error(error); }
-  };
+function App() {
+  // ... (poprzednie stany) ...
+  const [mojNick, setMojNick] = useState(localStorage.getItem('shoutboxNick') || '');
+  
+  // NOWOŚĆ 1: Stan przechowujący nick osoby, która aktualnie pisze
+  const [ktoPisze, setKtoPisze] = useState(null);
 
   useEffect(() => {
-    pobierzDane();
-    const interval = setInterval(pobierzDane, 2000);
-    return () => clearInterval(interval);
+    socket.on('chat_update', (noweWiadomosci) => {
+      setWiadomosci(noweWiadomosci);
+    });
+
+    // NOWOŚĆ 2: Nasłuchujemy, czy ktoś inny pisze
+    let typingTimer;
+    socket.on('is_typing', (nick) => {
+      setKtoPisze(nick); // Zapisujemy nick
+      
+      // Magia UX: Czekamy 2 sekundy. Jeśli w tym czasie nie przyleci 
+      // nowy sygnał 'is_typing', uznajemy, że osoba przestała pisać.
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        setKtoPisze(null);
+      }, 2000);
+    });
+
+    return () => {
+      socket.off('chat_update');
+      socket.off('is_typing'); // <-- Sprzątamy po sobie!
+    };
   }, []);
 
-  // --- WYSYŁANIE (POST) ---
+  // NOWOŚĆ 3: Funkcja, która odpala się, gdy MY piszemy
+  const handleTyping = () => {
+    socket.emit('typing', mojNick);
+  };
+
+  // --- ODBIERANIE WIADOMOŚCI (WEBSOCKET) ---
+  useEffect(() => {
+    // 3. Nasłuchujemy na sygnał z serwera. Kiedy wpadnie, aktualizujemy Stan!
+    socket.on('chat_update', (noweWiadomosci) => {
+      setWiadomosci(noweWiadomosci);
+    });
+
+    // 4. Funkcja sprzątająca wyłącza nasłuch przy zamknięciu komponentu
+    return () => {
+      socket.off('chat_update');
+    };
+  }, []); // <- Pusta tablica: podłączamy się tylko raz
+
+  // --- WYSYŁANIE (HTTP POST) ---
   const handleDodajWiadomosc = async (nowyTekst) => {
     try {
       await fetch(API_URL, {
@@ -33,11 +72,11 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ author: mojNick, text: nowyTekst })
       });
-      pobierzDane(); // Natychmiastowe odświeżenie po wysłaniu
+      // Nie musimy już ręcznie odświeżać! Serwer sam wypchnie nową tablicę!
     } catch (error) { console.error(error); }
   };
 
-  // --- NOWOŚĆ: LAJKOWANIE (PATCH) ---
+  // --- LAJKOWANIE (HTTP PATCH) ---
   const handleLajkuj = async (id) => {
     try {
       await fetch(`${API_URL}/${id}/like`, {
@@ -45,16 +84,14 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ author: mojNick })
       });
-      pobierzDane(); // Odśwież widok
     } catch (error) { console.error(error); }
   };
 
-  // --- NOWOŚĆ: USUWANIE (DELETE) ---
+  // --- USUWANIE (HTTP DELETE) ---
   const handleUsun = async (id) => {
     if (!window.confirm("Czy na pewno chcesz usunąć tę wiadomość?")) return;
     try {
       await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-      pobierzDane(); // Odśwież widok
     } catch (error) { console.error(error); }
   };
 
@@ -89,5 +126,19 @@ function App() {
     </div>
   );
 }
+  {/* ... (koniec okna z wiadomościami) ... */}
+      <div>
 
+      {/* NOWOŚĆ 4: Pokaż napis TYLKO wtedy, gdy zmienna ktoPisze nie jest pusta */}
+      {ktoPisze && (
+        <div style={{ padding: '0 20px', fontSize: '0.85em', color: '#7f8c8d', fontStyle: 'italic', marginBottom: '5px' }}>
+          ✏️ {ktoPisze} pisze wiadomość...
+        </div>
+      )}
+
+      {/* NOWOŚĆ 5: Przekazujemy funkcję handleTyping do formularza */}
+      <MessageForm onWyslij={handleDodajWiadomosc} onTyping={handleTyping} />
+    </div>
+
+export default App;
 export default App;
